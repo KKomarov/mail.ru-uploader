@@ -36,11 +36,11 @@ from logging.handlers import RotatingFileHandler
 
 __version__ = '0.0.8'
 
-IS_CONFIG_PRESENT = False # local configuration file presence indicator
-CONFIG_FILE = './.config' # configuration file, will be created on the very first use
+IS_CONFIG_PRESENT = False  # local configuration file presence indicator
+CONFIG_FILE = './.config'  # configuration file, will be created on the very first use
 # trying to load local configuration file
 config = configparser.ConfigParser(delimiters=(':'))
-config.optionxform=str
+config.optionxform = str
 if config.read(CONFIG_FILE):
     IS_CONFIG_PRESENT = True
 
@@ -71,19 +71,19 @@ MOVE_UPLOADED = config.getboolean('Behaviour', 'MoveUploaded', fallback=False)
 REMOVE_FOLDERS = config.getboolean('Behaviour', 'RemoveFolders', fallback=True)
 ###--------------------------------------###
 
-LOG_FILE  = './upload.log' # log file path relative to the module location
+LOG_FILE = './upload.log'  # log file path relative to the module location
 CLOUD_URL = 'https://cloud.mail.ru/api/v2/'
-LOGIN_CHECK_STRING = '"storages"' # simple way to check successful cloud authorization
-VERIFY_SSL = True # True, use False only for debug and if you know what you're doing
-CLOUD_DOMAIN_ORD = 2 # 2 - practice, 1 - theory
-API_VER = 2 # 2 - constant so far
-TIME_AMEND = '0246' # '0246', exact meaning has not been quite sorted out yet
-CLOUD_CONFLICT = 'strict' # 'strict' - should remain constant at least until 'rename' implementation
-MAX_FILE_SIZE = 2*1024*1024*1024 # 2*1024*1024*1024 (bytes ~ 2 GB), API constraint
-FILES_TO_PRESERVE = ('application/zip', ) # do not archive already zipped files
-DEFAULT_FILETYPE = 'text/plain' # 'text/plain' is good option
+LOGIN_CHECK_STRING = '"storages"'  # simple way to check successful cloud authorization
+VERIFY_SSL = True  # True, use False only for debug and if you know what you're doing
+CLOUD_DOMAIN_ORD = 2  # 2 - practice, 1 - theory
+API_VER = 2  # 2 - constant so far
+TIME_AMEND = '0246'  # '0246', exact meaning has not been quite sorted out yet
+CLOUD_CONFLICT = 'strict'  # 'strict' - should remain constant at least until 'rename' implementation
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2*1024*1024*1024 (bytes ~ 2 GB), API constraint
+FILES_TO_PRESERVE = ('application/zip',)  # do not archive already zipped files
+DEFAULT_FILETYPE = 'text/plain'  # 'text/plain' is good option
 # do not upload this files (only for module's directory)
-FILES_TO_SKIP = set((os.path.basename(CONFIG_FILE), os.path.basename(LOG_FILE)))
+FILES_TO_SKIP = {os.path.basename(CONFIG_FILE), os.path.basename(LOG_FILE)}
 CACERT_FILE = 'cacert.pem'
 EMAIL_REGEXP = re.compile(r'^.+\@.+\..+$')
 LOGGER = None
@@ -91,9 +91,10 @@ LOGGER = None
 
 class CallsCounter():
     """ instantiate with a target callable to count calls """
+
     def __init__(self, callable):
         self.calls = 0
-        self.callable=callable
+        self.callable = callable
 
     def __call__(self, *args, **kwargs):
         self.calls += 1
@@ -104,7 +105,7 @@ def get_logger(name, log_file=LOG_FILE):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     # create a file handler
-    handler = RotatingFileHandler(log_file, mode='a', maxBytes=5*1024*1024, backupCount=2, encoding=None, delay=0)
+    handler = RotatingFileHandler(log_file, mode='a', maxBytes=5 * 1024 * 1024, backupCount=2, encoding=None, delay=0)
     handler.setLevel(logging.INFO)
     # create a logging format
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -125,8 +126,8 @@ def get_email_domain(email=LOGIN):
 def cloud_auth(session, login=LOGIN, password=PASSWORD):
     try:
         r = session.post('https://auth.mail.ru/cgi-bin/auth?lang=ru_RU&from=authpopup',
-                         data = {'Login': login, 'Password': password, 'page': urljoin(CLOUD_URL, '?from=promo'),
-                                 'new_auth_form': 1, 'Domain': get_email_domain(login)}, verify = VERIFY_SSL)
+                         data={'Login': login, 'Password': password, 'page': urljoin(CLOUD_URL, '?from=promo'),
+                               'new_auth_form': 1, 'Domain': get_email_domain(login)}, verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Cloud auth HTTP request error: {}'.format(e))
@@ -147,7 +148,7 @@ HTTP code: {}, msg: {}'.format(r.status_code, r.text))
 
 def get_csrf(session):
     try:
-        r = session.get(urljoin(CLOUD_URL, 'tokens/csrf'), verify = VERIFY_SSL)
+        r = session.get(urljoin(CLOUD_URL, 'tokens/csrf'), verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Get csrf HTTP request error: {}'.format(e))
@@ -169,11 +170,11 @@ def get_upload_domain(session, csrf=''):
     it seems that csrf isn't necessary in session,
     but forcing assert anyway to avoid possible future damage
     """
-    assert csrf is not None, 'no CSRF' 
+    assert csrf is not None, 'no CSRF'
     url = urljoin(CLOUD_URL, 'dispatcher?token=' + csrf)
 
     try:
-        r = session.get(url, verify = VERIFY_SSL)
+        r = session.get(url, verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Get upload domain HTTP request error: {}'.format(e))
@@ -198,14 +199,14 @@ def get_cloud_space(session, csrf='', login=LOGIN):
     """ returns available free space in bytes """
     assert csrf is not None, 'no CSRF'
 
-    timestamp = str(int(time.mktime(datetime.datetime.now().timetuple())* 1000))
+    timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()) * 1000))
     quoted_login = quote_plus(login)
     command = ('user/space?api=' + str(API_VER) + '&email=' + quoted_login +
                '&x-email=' + quoted_login + '&token=' + csrf + '&_=' + timestamp)
     url = urljoin(CLOUD_URL, command)
 
     try:
-        r = session.get(url, verify = VERIFY_SSL)
+        r = session.get(url, verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Get cloud space HTTP request error: {}'.format(e))
@@ -220,6 +221,7 @@ def get_cloud_space(session, csrf='', login=LOGIN):
         LOGGER.error('Cloud free space request error. Check your connection. \
 HTTP code: {}, msg: {}'.format(r.status_code, r.text))
     return 0
+
 
 def post_file(session, domain='', file='', login=LOGIN):
     """ posts file to the cloud's upload server
@@ -237,11 +239,12 @@ def post_file(session, domain='', file='', login=LOGIN):
     filename = os.path.basename(file)
     quoted_login = quote_plus(login)
     timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()))) + TIME_AMEND
-    url = urljoin(domain, '?cloud_domain=' + str(CLOUD_DOMAIN_ORD) + '&x-email=' + quoted_login + '&fileapi' + timestamp)
+    url = urljoin(domain,
+                  '?cloud_domain=' + str(CLOUD_DOMAIN_ORD) + '&x-email=' + quoted_login + '&fileapi' + timestamp)
     m = MultipartEncoder(fields={'file': (quote_plus(filename), open(file, 'rb'), filetype)})
 
     try:
-        r = session.post(url, data=m, headers={'Content-Type': m.content_type}, verify = VERIFY_SSL)
+        r = session.post(url, data=m, headers={'Content-Type': m.content_type}, verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Post file HTTP request error: {}'.format(e))
@@ -259,7 +262,7 @@ def post_file(session, domain='', file='', login=LOGIN):
     return (None, None)
 
 
-def make_post(session, obj='', csrf='', command='', params = None):
+def make_post(session, obj='', csrf='', command='', params=None):
     """ invokes standart cloud post operation
     tested operations: ('file/add', 'folder/add', 'file/remove')
     does not replace existent objects, but logs them
@@ -276,7 +279,8 @@ def make_post(session, obj='', csrf='', command='', params = None):
         postdata.update(params)
 
     try:
-        r = session.post(url, data=postdata, headers={'Content-Type': 'application/x-www-form-urlencoded'}, verify=VERIFY_SSL)
+        r = session.post(url, data=postdata, headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                         verify=VERIFY_SSL)
     except Exception as e:
         if LOGGER:
             LOGGER.error('Make post ({}) HTTP request error: {}'.format(command, e))
@@ -294,7 +298,8 @@ def make_post(session, obj='', csrf='', command='', params = None):
                 LOGGER.warning('Command {} failed. Object {} already exists'.format(command, obj))
             return True
     if LOGGER:
-        LOGGER.error('Command {} on object {} failed. HTTP code: {}, msg: {}'.format(command, obj, r.status_code, r.text))
+        LOGGER.error(
+            'Command {} on object {} failed. HTTP code: {}, msg: {}'.format(command, obj, r.status_code, r.text))
     return None
 
 
@@ -303,7 +308,7 @@ def add_file(session, file='', hash='', size=0, csrf=''):
     assert len(hash) == 40, 'invalid hash: {}'.format(hash)
     assert size >= 0, 'invalid size: {}'.format(size)
 
-    return make_post(session, obj=file, csrf=csrf, command='file/add', params = {'hash': hash, 'size': size})
+    return make_post(session, obj=file, csrf=csrf, command='file/add', params={'hash': hash, 'size': size})
 
 
 def create_folder(session, folder='', csrf=''):
@@ -371,7 +376,9 @@ def get_dir_files(path=UPLOAD_PATH, space=0):
                 yield file
             else:
                 if LOGGER:
-                    LOGGER.warning('Not enough cloud space for <{}>. Left: {} (B). Required: {} (B).'.format(file, space, file_size))
+                    LOGGER.warning(
+                        'Not enough cloud space for <{}>. Left: {} (B). Required: {} (B).'.format(file, space,
+                                                                                                  file_size))
                 continue
         else:
             if LOGGER:
@@ -387,10 +394,11 @@ def get_yes_no(value):
 def create_cloud_path(path, cloud_base=CLOUD_PATH, local_base=UPLOAD_PATH):
     """ converts os path to the format acceptable by the cloud
     example:
-    cloud_base='/backups'
-    local_base='./upload'
-    path='./upload\\level1_1'
-    result='/backups/level1_1'
+    >>> cloud_base='/backups'
+    >>> local_base='./upload'
+    >>> path='./upload\\level1_1'
+    >>> create_cloud_path(path, cloud_base, local_base)
+    '/backups/level1_1'
     """
     normalized_path = path.replace('\\', '/')
     clean_path = normalized_path.replace(local_base, '', 1)
@@ -424,7 +432,7 @@ def main():
             # supplying ca certificate for https
             # cacert file should be in module's directory
             # for cx_Freeze
-            #cacert = os.path.join(os.path.dirname(sys.executable), CACERT_FILE)
+            # cacert = os.path.join(os.path.dirname(sys.executable), CACERT_FILE)
             # for PyInstaller
             cacert = resource_path(CACERT_FILE)
         else:
@@ -459,7 +467,7 @@ def main():
                                 try:
                                     for file in get_dir_files(path=folder, space=get_cloud_space(s, csrf=cloud_csrf)):
                                         hash, size = post_file(s, domain=upload_domain, file=file)
-                                        if size>=0 and hash:
+                                        if size >= 0 and hash:
                                             LOGGER.info('File {} successfully posted'.format(file))
                                             cloud_file = cloud_path + '/' + os.path.basename(file)
                                             if add_file(s, file=cloud_file, hash=hash, size=size, csrf=cloud_csrf):
@@ -475,7 +483,7 @@ def main():
                         upload_dir = os.path.abspath(UPLOAD_PATH)
                         uploaded_dir = os.path.abspath(UPLOADED_PATH)
                         for file in uploaded_files:
-                            file_dir, file_name  = os.path.split(os.path.abspath(file))
+                            file_dir, file_name = os.path.split(os.path.abspath(file))
                             # pretty unreliable way to create path
                             file_new_dir = file_dir.replace(upload_dir, uploaded_dir, 1)
                             os.makedirs(file_new_dir, exist_ok=True)
@@ -490,8 +498,10 @@ def main():
                             if folder != UPLOAD_PATH and not os.listdir(folder):
                                 os.rmdir(folder)
                                 LOGGER.info('Empty directory {} deleted'.format(folder))
-                print('{} file(s) uploaded. Errors: {}. Warnings: {}. See {} for details.'.format(uploaded_num, LOGGER.error.calls,
-                                                                                                  LOGGER.warning.calls, LOG_FILE))
+                print('{} file(s) uploaded. Errors: {}. Warnings: {}. See {} for details.'.format(uploaded_num,
+                                                                                                  LOGGER.error.calls,
+                                                                                                  LOGGER.warning.calls,
+                                                                                                  LOG_FILE))
             else:
                 LOGGER.critical('Bad email: (). Check credentials settings in {}'.format(LOGIN, CONFIG_FILE))
         else:
@@ -504,7 +514,8 @@ def main():
                                    'RemoveFolders': get_yes_no(REMOVE_FOLDERS)}
             with open(CONFIG_FILE, mode='w') as f:
                 config.write(f)
-            LOGGER.warning('First run. Creating settings file: <{}>. Fill it out and run module again.'.format(CONFIG_FILE))
+            LOGGER.warning(
+                'First run. Creating settings file: <{}>. Fill it out and run module again.'.format(CONFIG_FILE))
             print('Please, check your settings in <{}>. Then run me again'.format(CONFIG_FILE))
     except:
         LOGGER.error('Uncaught exception:', exc_info=True)
