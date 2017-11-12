@@ -28,6 +28,8 @@ import zipfile
 import requests
 import datetime
 import configparser
+import shutil
+
 from shutil import move
 from mimetypes import guess_type
 from requests_toolbelt import MultipartEncoder
@@ -86,7 +88,6 @@ DEFAULT_FILETYPE = 'text/plain'  # 'text/plain' is good option
 FILES_TO_SKIP = {os.path.basename(CONFIG_FILE), os.path.basename(LOG_FILE)}
 CACERT_FILE = 'cacert.pem'
 EMAIL_REGEXP = re.compile(r'^.+\@.+\..+$')
-LOGGER = None
 
 
 class CallsCounter():
@@ -116,6 +117,8 @@ def get_logger(name, log_file=LOG_FILE):
     logger.error = CallsCounter(logger.error)
     logger.warning = CallsCounter(logger.warning)
     return logger
+# setting up global logger
+LOGGER = get_logger(__name__, log_file=LOG_FILE)
 
 
 def get_email_domain(email=LOGIN):
@@ -195,72 +198,6 @@ def get_cloud_csrf(session):
     return None
 
 
-def get_cloud_space(session, csrf='', login=LOGIN):
-    """ returns available free space in bytes """
-    assert csrf is not None, 'no CSRF'
-
-    timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()) * 1000))
-    quoted_login = quote_plus(login)
-    command = ('user/space?api=' + str(API_VER) + '&email=' + quoted_login +
-               '&x-email=' + quoted_login + '&token=' + csrf + '&_=' + timestamp)
-    url = urljoin(CLOUD_URL, command)
-
-    try:
-        r = session.get(url, verify=VERIFY_SSL)
-    except Exception as e:
-        if LOGGER:
-            LOGGER.error('Get cloud space HTTP request error: {}'.format(e))
-        return 0
-
-    if r.status_code == requests.codes.ok:
-        r_json = r.json()
-        total_bytes = r_json['body']['total'] * 1024 * 1024
-        used_bytes = r_json['body']['used'] * 1024 * 1024
-        return total_bytes - used_bytes
-    elif LOGGER:
-        LOGGER.error('Cloud free space request error. Check your connection. \
-HTTP code: {}, msg: {}'.format(r.status_code, r.text))
-    return 0
-
-
-def post_file(session, domain='', file='', login=LOGIN):
-    """ posts file to the cloud's upload server
-    param: file - string filename with path
-    """
-    assert domain is not None, 'no domain'
-    assert file is not None, 'no file'
-
-    filetype = guess_type(file)[0]
-    if not filetype:
-        filetype = DEFAULT_FILETYPE
-        if LOGGER:
-            LOGGER.warning('File {} type is unknown, using default: {}'.format(file, DEFAULT_FILETYPE))
-
-    filename = os.path.basename(file)
-    quoted_login = quote_plus(login)
-    timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()))) + TIME_AMEND
-    url = urljoin(domain,
-                  '?cloud_domain=' + str(CLOUD_DOMAIN_ORD) + '&x-email=' + quoted_login + '&fileapi' + timestamp)
-    m = MultipartEncoder(fields={'file': (quote_plus(filename), open(file, 'rb'), filetype)})
-
-    try:
-        r = session.post(url, data=m, headers={'Content-Type': m.content_type}, verify=VERIFY_SSL)
-    except Exception as e:
-        if LOGGER:
-            LOGGER.error('Post file HTTP request error: {}'.format(e))
-        return (None, None)
-
-    if r.status_code == requests.codes.ok:
-        if len(r.content):
-            hash = r.content[:40].decode()
-            size = int(r.content[41:-2])
-            return (hash, size)
-        elif LOGGER:
-            LOGGER.error('File {} post error, no hash and size received'.format(file))
-    elif LOGGER:
-        LOGGER.error('File {} post error, http code: {}, msg: {}'.format(file, r.status_code, r.text))
-    return (None, None)
-
 
 def make_post(session, obj='', csrf='', command='', params=None):
     """ invokes standart cloud post operation
@@ -303,29 +240,6 @@ def make_post(session, obj='', csrf='', command='', params=None):
     return None
 
 
-def add_file(session, file='', hash='', size=0, csrf=''):
-    """ 'file' should be filename with absolute cloud path """
-    assert len(hash) == 40, 'invalid hash: {}'.format(hash)
-    assert size >= 0, 'invalid size: {}'.format(size)
-
-    return make_post(session, obj=file, csrf=csrf, command='file/add', params={'hash': hash, 'size': size})
-
-
-def create_folder(session, folder='', csrf=''):
-    """ Takes 'folder' as new folder name with full cloud path (without 'home'),
-    returns True even if target folder already existed
-    Path should start with forward slash,
-    no final slash should be present after the target folder name
-    """
-    return make_post(session, obj=folder, csrf=csrf, command='folder/add')
-
-
-def remove_object(session, obj='', csrf=''):
-    """ moves a file or a folder to the cloud's recycle bin
-    at his time utilized in testing only
-    example call: remove_object(session, obj='/backups/test.txt', csrf='8q3q6wUF3HLVZReni3SGna5vHsbgtDEx')
-    """
-    return make_post(session, obj=obj, csrf=csrf, command='file/remove')
 
 
 def zip_file(file):
@@ -420,108 +334,224 @@ def close_logger(logger):
         logger.removeHandler(handler)
 
 
-def main():
-    # setting up global logger
-    global LOGGER
-    LOGGER = get_logger(__name__, log_file=LOG_FILE)
-    # global (almost) Exception handler
-    try:
-        if IS_FROZEN:
-            # do not upload self, skip exe file with dependencies
-            FILES_TO_SKIP.add(os.path.basename(sys.executable))
-            # supplying ca certificate for https
-            # cacert file should be in module's directory
-            # for cx_Freeze
-            # cacert = os.path.join(os.path.dirname(sys.executable), CACERT_FILE)
-            # for PyInstaller
-            cacert = resource_path(CACERT_FILE)
-        else:
-            # provide CA cert (not necessary)
-            cacert = requests.certs.where()
-            # do not upload self, skip module's file
+class CloudMailRu(requests.Session):
+    def __init__(self, *args, **kwargs):
+        self.cloud_api = 'https://cloud.mail.ru/api/v2/'
+        self.cloud_csrf = None
+        self.upload_domain = None
+        self.download_domain = None
+        super(CloudMailRu, self).__init__()
+
+    def __enter__(self):
+        session = super(CloudMailRu, self).__enter__()
+        self.cloud_csrf = get_cloud_csrf(session)
+        self.upload_domain, self.download_domain = self.get_domains()
+
+        return self
+
+    def get_domains(self):
+        url = urljoin(self.cloud_api, 'dispatcher?token=' + self.cloud_csrf)
+        r = self.get(url, verify=VERIFY_SSL)
+
+        if r.status_code == requests.codes.ok:
+            r_json = r.json()
+            return r_json['body']['upload'][0]['url'], r_json['body']['get'][0]['url']
+
+    def add_file(self, file, hash='', size=0):
+        """ 'file' should be filename with absolute cloud path """
+        assert len(hash) == 40, 'invalid hash: {}'.format(hash)
+        assert size >= 0, 'invalid size: {}'.format(size)
+
+        return make_post(self, obj=file, csrf=self.cloud_csrf, command='file/add', params={'hash': hash, 'size': size})
+
+    def create_folder(self, folder=''):
+        """ Takes 'folder' as new folder name with full cloud path (without 'home'),
+        returns True even if target folder already existed
+        Path should start with forward slash,
+        no final slash should be present after the target folder name
+        """
+        return make_post(self, obj=folder, csrf=self.cloud_csrf, command='folder/add')
+
+    def remove_object(self, obj=''):
+        """ moves a file or a folder to the cloud's recycle bin
+        at his time utilized in testing only
+        example call: remove_object(session, obj='/backups/test.txt', csrf='8q3q6wUF3HLVZReni3SGna5vHsbgtDEx')
+        """
+        return make_post(self, obj=obj, csrf=self.cloud_csrf, command='file/remove')
+
+    def get_file(self, file_path, dest_path):
+        # url = urljoin(self.download_domain, file_path)
+        url = self.download_domain + file_path
+        try:
+            r = self.get(url, stream=True, verify=VERIFY_SSL)
+            print(r)
+            if r.status_code != 200:
+                return
+            with open(dest_path, 'wb') as f:
+                r.raw.decode_content = True
+                shutil.copyfileobj(r.raw, f)
+
+        except:
+            pass
+
+    def list_files(self, dir):
+        url = self.cloud_api + 'folder?home={dir}&token={token}'.format(dir=dir, token=self.cloud_csrf)
+        r = self.get(url, verify=VERIFY_SSL)
+        if r.status_code != 200:
+            return
+        print(r.text)
+
+    def post_file(self, file, login=LOGIN):
+        """ posts file to the cloud's upload server
+        param: file - string filename with path
+        """
+        assert file is not None, 'no file'
+
+        filetype = guess_type(file)[0]
+        if not filetype:
+            filetype = DEFAULT_FILETYPE
+            if LOGGER:
+                LOGGER.warning('File {} type is unknown, using default: {}'.format(file, DEFAULT_FILETYPE))
+
+        filename = os.path.basename(file)
+        quoted_login = quote_plus(login)
+        timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()))) + TIME_AMEND
+        url = urljoin(self.upload_domain,
+                      '?cloud_domain=' + str(CLOUD_DOMAIN_ORD) + '&x-email=' + quoted_login + '&fileapi' + timestamp)
+        with open(file, 'rb') as f:
+            m = MultipartEncoder(fields={'file': (quote_plus(filename), f, filetype)})
+
             try:
-                self_file = os.path.basename(os.path.abspath(sys.modules['__main__'].__file__))
+                r = self.post(url, data=m, headers={'Content-Type': m.content_type}, verify=VERIFY_SSL)
+            except Exception as e:
+                if LOGGER:
+                    LOGGER.error('Post file HTTP request error: {}'.format(e))
+                return None, None
+
+        if r.status_code == requests.codes.ok:
+            if len(r.content):
+                hash = r.content[:40].decode()
+                size = int(r.content[41:-2])
+                return hash, size
+            elif LOGGER:
+                LOGGER.error('File {} post error, no hash and size received'.format(file))
+        elif LOGGER:
+            LOGGER.error('File {} post error, http code: {}, msg: {}'.format(file, r.status_code, r.text))
+        return None, None
+
+    def upload_file(self, local_path, cloud_path):
+        pass
+
+    def get_cloud_space(self, login=LOGIN):
+        """ returns available free space in bytes """
+
+        timestamp = str(int(time.mktime(datetime.datetime.now().timetuple()) * 1000))
+        quoted_login = quote_plus(login)
+        command = ('user/space?api=' + str(API_VER) + '&email=' + quoted_login +
+                   '&x-email=' + quoted_login + '&token=' + self.cloud_csrf + '&_=' + timestamp)
+        url = urljoin(CLOUD_URL, command)
+
+        try:
+            r = self.get(url, verify=VERIFY_SSL)
+        except Exception as e:
+            if LOGGER:
+                LOGGER.error('Get cloud space HTTP request error: {}'.format(e))
+            return 0
+
+        if r.status_code == requests.codes.ok:
+            r_json = r.json()
+            total_bytes = r_json['body']['total'] * 1024 * 1024
+            used_bytes = r_json['body']['used'] * 1024 * 1024
+            return total_bytes - used_bytes
+        elif LOGGER:
+            LOGGER.error('Cloud free space request error. Check your connection. \
+    HTTP code: {}, msg: {}'.format(r.status_code, r.text))
+        return 0
+
+
+def shell():
+    import argparse
+    parser = argparse.ArgumentParser(description='Copies a local file or cloud object to '
+                                                 'another location locally or to cloud.')
+    group1 = parser.add_argument_group('group1', 'group1 description')
+
+    group1.add_argument('op', choices=['cp', 'mv', 'rm'], help='operation')
+    group2 = parser.add_argument_group('group2', 'group2 description')
+
+    group2.add_argument('from_path')
+    group2.add_argument('to_path')
+    group2.add_argument('--recursive', '-r', action='store_true')
+
+    args = parser.parse_args()
+    print(args)
+    if args.op == 'cp':
+       copy_dir(args.from_path, args.to_path)
+
+
+def copy_dir(from_path, to_path):
+    cert_stuff()
+    os.path.isdir(from_path)
+    uploaded_files = set()
+    with CloudMailRu() as api:
+        for folder, __, __ in list(os.walk(from_path)):
+            # cloud dir should exist before uploading
+            cloud_path = create_cloud_path(folder, cloud_base=to_path, local_base=from_path)
+            api.create_folder(folder=cloud_path)
+            # uploading files
+            try:
+                for file in get_dir_files(path=folder, space=api.get_cloud_space()):
+                    hash, size = api.post_file(file=file)
+                    if size >= 0 and hash:
+                        LOGGER.info('File {} successfully posted'.format(file))
+                        cloud_file = cloud_path + '/' + os.path.basename(file)
+                        if api.add_file(file=cloud_file, hash=hash, size=size):
+                            LOGGER.info('File {} successfully added'.format(file))
+                            uploaded_files.add(file)
             except:
-                LOGGER.warning('Cannot get self file name.')
-            else:
-                FILES_TO_SKIP.add(self_file)
-        assert os.path.isfile(cacert), 'Fatal Error. CA certificate not found.'
-        os.environ["REQUESTS_CA_BUNDLE"] = cacert
-        # some day this conditional mess should be replaced with class
-        # cloud credentials should be in the configuration file
-        if IS_CONFIG_PRESENT:
-            # email (login) check
-            if EMAIL_REGEXP.match(LOGIN):
-                # preparing to upload
-                uploaded_files = set()
-                with requests.Session() as s:
-                    cloud_csrf = get_cloud_csrf(s)
-                    if cloud_csrf:
-                        upload_domain = get_upload_domain(s, csrf=cloud_csrf)
-                        if upload_domain and os.path.isdir(UPLOAD_PATH):
-                            for folder, __, __ in list(os.walk(UPLOAD_PATH)):
-                                # cloud dir should exist before uploading
-                                cloud_path = create_cloud_path(folder)
-                                create_folder(s, folder=cloud_path, csrf=cloud_csrf)
-                                # uploading files
-                                try:
-                                    for file in get_dir_files(path=folder, space=get_cloud_space(s, csrf=cloud_csrf)):
-                                        hash, size = post_file(s, domain=upload_domain, file=file)
-                                        if size >= 0 and hash:
-                                            LOGGER.info('File {} successfully posted'.format(file))
-                                            cloud_file = cloud_path + '/' + os.path.basename(file)
-                                            if add_file(s, file=cloud_file, hash=hash, size=size, csrf=cloud_csrf):
-                                                LOGGER.info('File {} successfully added'.format(file))
-                                                uploaded_files.add(file)
-                                except:
-                                    LOGGER.error('File upload error:', exc_info=True)
-                                    raise
-                uploaded_num = len(uploaded_files)
-                LOGGER.info('{} file(s) successfully uploaded'.format(uploaded_num))
-                if uploaded_num:
-                    if MOVE_UPLOADED:
-                        upload_dir = os.path.abspath(UPLOAD_PATH)
-                        uploaded_dir = os.path.abspath(UPLOADED_PATH)
-                        for file in uploaded_files:
-                            file_dir, file_name = os.path.split(os.path.abspath(file))
-                            # pretty unreliable way to create path
-                            file_new_dir = file_dir.replace(upload_dir, uploaded_dir, 1)
-                            os.makedirs(file_new_dir, exist_ok=True)
-                            move(file, os.path.join(file_new_dir, file_name))
-                            LOGGER.info('file {} moved to {}'.format(file, file_new_dir))
-                    elif REMOVE_UPLOADED:
-                        for file in uploaded_files:
-                            os.unlink(file)
-                            LOGGER.info('file {} removed'.format(file))
-                    if REMOVE_FOLDERS and (MOVE_UPLOADED or REMOVE_UPLOADED):
-                        for folder, __, __ in list(os.walk(UPLOAD_PATH, topdown=False)):
-                            if folder != UPLOAD_PATH and not os.listdir(folder):
-                                os.rmdir(folder)
-                                LOGGER.info('Empty directory {} deleted'.format(folder))
-                print('{} file(s) uploaded. Errors: {}. Warnings: {}. See {} for details.'.format(uploaded_num,
-                                                                                                  LOGGER.error.calls,
-                                                                                                  LOGGER.warning.calls,
-                                                                                                  LOG_FILE))
-            else:
-                LOGGER.critical('Bad email: (). Check credentials settings in {}'.format(LOGIN, CONFIG_FILE))
+                LOGGER.error('File upload error:', exc_info=True)
+                raise
+    print(uploaded_files)
+    uploaded_num = len(uploaded_files)
+
+
+def copy_file(from_path, to_path):
+    cert_stuff()
+    downloaded = set()
+    with CloudMailRu() as api:
+        api.get_file(from_path, to_path)
+    print(downloaded)
+    uploaded_num = len(downloaded)
+
+
+def get_list(cloud_path):
+    cert_stuff()
+    with CloudMailRu() as api:
+        return api.list_files(cloud_path)
+
+
+def cert_stuff():
+    if IS_FROZEN:
+        # do not upload self, skip exe file with dependencies
+        FILES_TO_SKIP.add(os.path.basename(sys.executable))
+        # supplying ca certificate for https
+        # cacert file should be in module's directory
+        # for cx_Freeze
+        # cacert = os.path.join(os.path.dirname(sys.executable), CACERT_FILE)
+        # for PyInstaller
+        cacert = resource_path(CACERT_FILE)
+    else:
+        # provide CA cert (not necessary)
+        cacert = requests.certs.where()
+        # do not upload self, skip module's file
+        try:
+            self_file = os.path.basename(os.path.abspath(sys.modules['__main__'].__file__))
+        except:
+            LOGGER.warning('Cannot get self file name.')
         else:
-            # creating a default config if local configuration does not exists
-            config['Credentials'] = {'Email': LOGIN, 'Password': PASSWORD}
-            config['Locations'] = {'CloudPath': CLOUD_PATH, 'UploadPath': UPLOAD_PATH, 'UploadedPath': UPLOADED_PATH}
-            config['Behaviour'] = {'ArchiveFiles': get_yes_no(ARCHIVE_FILES),
-                                   'MoveUploaded': get_yes_no(MOVE_UPLOADED),
-                                   'RemoveUploaded': get_yes_no(REMOVE_UPLOADED),
-                                   'RemoveFolders': get_yes_no(REMOVE_FOLDERS)}
-            with open(CONFIG_FILE, mode='w') as f:
-                config.write(f)
-            LOGGER.warning(
-                'First run. Creating settings file: <{}>. Fill it out and run module again.'.format(CONFIG_FILE))
-            print('Please, check your settings in <{}>. Then run me again'.format(CONFIG_FILE))
-    except:
-        LOGGER.error('Uncaught exception:', exc_info=True)
-    LOGGER.info('###----------SESSION ENDED----------###')
-    close_logger(LOGGER)
+            FILES_TO_SKIP.add(self_file)
+    assert os.path.isfile(cacert), 'Fatal Error. CA certificate not found.'
+    os.environ["REQUESTS_CA_BUNDLE"] = cacert
 
 
 if __name__ == '__main__':
-    main()
+    shell()
