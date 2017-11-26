@@ -12,27 +12,25 @@ usage:
 python setup.py build
 """
 
-import sys
-import requests
-from cx_Freeze import setup, Executable
+from setuptools import setup
 
-from upload import __version__
+from cmr import __version__
 
-
-options = {
-    'build_exe': {
-        'packages': ['requests', 'requests_toolbelt'],
-        'include_files' : [(requests.certs.where(), 'cacert.pem')]
-    }
-}
-
-executables = [
-    Executable('upload.py', base='Console')
+requires = [
+    'requests',
+    'requests_toolbelt'
 ]
 
-setup(name = "mail.ru-uploader" ,
-      version = __version__,
-      description = "unofficial mail.ru uploader",
-      options=options,
-      executables=executables
-      )
+setup(
+    name="mail.ru-cli",
+    version=__version__,
+    description="unofficial mail.ru command line tool",
+    packages=['cmr'],
+    package_data={'': ['LICENSE']},
+    package_dir={'cmr': 'cmr'},
+    entry_points={
+        'console_scripts': ['cmr=cmr:shell'],
+    },
+    install_requires=requires,
+    license='MIT',
+)
