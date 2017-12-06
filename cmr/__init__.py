@@ -16,6 +16,7 @@ pip install requests requests-toolbelt
 example run from venv:
 python -m upload
 """
+import argparse
 import configparser
 import datetime
 import logging
@@ -383,42 +384,51 @@ class CloudMailRu(requests.Session):
 
 
 def shell():
-    import argparse
-    parser = argparse.ArgumentParser(description='Copies a local file or cloud object to '
-                                                 'another location locally or to cloud.')
-    group1 = parser.add_argument_group('group1', 'group1 description')
-
-    group1.add_argument('op', choices=['cp', 'configure'], help='operation')  # 'mv', 'rm',
-    group2 = parser.add_argument_group('group2', 'group2 description')
-
-    group2.add_argument('from_path')
-    group2.add_argument('to_path')
-    group2.add_argument('-r', '--recursive', action='store_true')
+    parser = argparse.ArgumentParser(description='File operations with mail ru cloud.')
+    parser.add_argument('op', choices=['cp', 'configure'], help='operation')  # 'mv', 'rm',
+    parser.add_argument('rest', nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
-    cloud_prefix = 'cmr:/'
     print(args)
+    if args.op == 'configure':
+        configure_shell(args.rest)
+    if args.op == 'cp':
+        copy_shell(args.rest)
+
+
+def configure_shell(args=None):
+    parser = argparse.ArgumentParser(description='Configure cloud mail ru client.')
+    parser.parse_args(args)
     values_to_promt = [
         ('cmr_email', 'Email'),
         ('cmr_pwd', 'Password'),
     ]
-    if args.op == 'configure':
-        for config_name, prompt_text in values_to_promt:
-            current_value = config.get('Credentials', config_name)
-            new_value = get_value(current_value, config_name, prompt_text)
-            if new_value is not None and new_value != current_value:
-                config[config_name] = new_value
-        with open(CONFIG_FILE, mode='w') as f:
-            config.write(f)
-    if args.op == 'cp':
-        if args.from_path.startswith(cloud_prefix):
-            from_path = args.from_path[len(cloud_prefix):]
-            download(from_path, args.to_path, args.recursive)
-        elif args.to_path.startswith(cloud_prefix):
-            to_path = args.to_path[len(cloud_prefix):]
-            upload(args.from_path, to_path, args.recursive)
-        else:
-            print("Can't copy local files")
+    for config_name, prompt_text in values_to_promt:
+        current_value = config.get('Credentials', config_name)
+        new_value = get_value(current_value, config_name, prompt_text)
+        if new_value is not None and new_value != current_value:
+            config[config_name] = new_value
+    with open(CONFIG_FILE, mode='w') as f:
+        config.write(f)
+
+
+def copy_shell(args_list=None):
+    parser = argparse.ArgumentParser(description='Copies a local file or cloud object to '
+                                                 'another location locally or to cloud.')
+    parser.add_argument('from_path')
+    parser.add_argument('to_path')
+    parser.add_argument('-r', '--recursive', action='store_true')
+    args = parser.parse_args(args_list)
+
+    cloud_prefix = 'cmr:/'
+    if args.from_path.startswith(cloud_prefix):
+        from_path = args.from_path[len(cloud_prefix):]
+        download(from_path, args.to_path, args.recursive)
+    elif args.to_path.startswith(cloud_prefix):
+        to_path = args.to_path[len(cloud_prefix):]
+        upload(args.from_path, to_path, args.recursive)
+    else:
+        print("Can't copy local files")
 
 
 def get_value(current_value, config_name, prompt_text=''):
