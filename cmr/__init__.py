@@ -397,24 +397,32 @@ def shell():
 
 
 def configure_shell(args=None):
+    '''
+    >>> configure_shell([])
+
+    '''
     parser = argparse.ArgumentParser(description='Configure cloud mail ru client.')
     parser.parse_args(args)
+    section = 'Credentials'
+    if not config.has_section(section):
+        config.add_section(section)
     values_to_promt = [
         ('cmr_email', 'Email'),
         ('cmr_pwd', 'Password'),
     ]
     for config_name, prompt_text in values_to_promt:
-        current_value = config.get('Credentials', config_name)
+        current_value = config.get(section, config_name, fallback='')
         new_value = get_value(current_value, config_name, prompt_text)
         if new_value is not None and new_value != current_value:
-            config[config_name] = new_value
+            config.set(section, config_name, new_value)
     with open(CONFIG_FILE, mode='w') as f:
         config.write(f)
 
 
 def copy_shell(args_list=None):
     parser = argparse.ArgumentParser(description='Copies a local file or cloud object to '
-                                                 'another location locally or to cloud.')
+                                                 'another location locally or to cloud.',
+                                     usage='%(prog)s cp [-h] [-r] from_path to_path')
     parser.add_argument('from_path')
     parser.add_argument('to_path')
     parser.add_argument('-r', '--recursive', action='store_true')

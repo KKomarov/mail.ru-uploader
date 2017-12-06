@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
-pip uninstall mail.ru-cli
-pip install .
+yes | pip3 uninstall mail.ru-cli
+pip3 install .
