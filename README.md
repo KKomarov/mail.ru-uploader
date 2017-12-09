@@ -1,5 +1,5 @@
 # mail.ru-cli
-Unofficial mail.ru cloud file cli tools. Check official license agreement first (https://cloud.mail.ru/LA/).
+Unofficial mail.ru cloud file command line tools. Check official license agreement first (https://cloud.mail.ru/LA/).
 
 ### Prerequisities
 
