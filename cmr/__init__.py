@@ -1,21 +1,3 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
-"""
-Created: 2016-08-09
-
-@author: pymancer, KKomarov
-
-uploads specified directory contents to mail.ru cloud
-- same name files in the cloud will NOT be replaced (still zipped and posted though)
-- preserves upload directory structure
-- functions are not fully designed for import
-
-requirements (Python 3.5):
-pip install requests requests-toolbelt
-
-example run from venv:
-python -m upload
-"""
 import argparse
 import configparser
 import datetime
@@ -34,8 +16,6 @@ from requests.compat import urljoin, quote_plus
 from requests_toolbelt import MultipartEncoder
 
 __all__ = ['shell', 'CloudMailRu', 'upload', 'download', 'get_list']
-
-__version__ = '0.0.9'
 
 IS_CONFIG_PRESENT = False  # local configuration file presence indicator
 CONFIG_FILE = os.path.expanduser('~/.cmr')  # configuration file, will be created on the very first use

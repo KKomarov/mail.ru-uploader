@@ -1,20 +1,6 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
-
-"""
-Created: 2016-08-10
-
-@author: pymancer
-
-windows executable cx_Freeze builder config
-
-usage:
-python setup.py build
-"""
-
 from setuptools import setup
 
-from cmr import __version__
+__version__ = '0.0.10'
 
 requires = [
     'requests',
