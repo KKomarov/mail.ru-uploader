@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import patch, call
-from cmr import upload, download, get_list
+
 from cmr import shell
+from cmr import upload, download, get_list
+
 
 class TestCopy(unittest.TestCase):
     def test_upload(self):
@@ -16,6 +18,9 @@ class TestCopy(unittest.TestCase):
     def test_listing(self):
         l = get_list('/RELEASE/')
         print(l)
+
+    def test_ls(self):
+        shell(['ls'])
 
     @patch('cmr.CloudMailRu')
     def test_shell_cp1(self, api_mock):

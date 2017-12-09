@@ -72,6 +72,7 @@ DEFAULT_FILETYPE = 'text/plain'  # 'text/plain' is good option
 FILES_TO_SKIP = {os.path.basename(CONFIG_FILE), os.path.basename(LOG_FILE)}
 CACERT_FILE = 'cacert.pem'
 EMAIL_REGEXP = re.compile(r'^.+\@.+\..+$')
+CLOUD_PREFIX = 'cmr:/'
 
 
 def get_logger(name, log_file=LOG_FILE):
@@ -371,24 +372,28 @@ class CloudMailRu(requests.Session):
 
 def shell(args_list=None):
     parser = argparse.ArgumentParser(description='File operations with mail ru cloud.')
-    parser.add_argument('op', choices=['cp', 'configure'], help='operation')  # 'mv', 'rm',
+    parser.add_argument('op', choices=['cp', 'ls', 'configure'], help='operation')  # 'mv', 'rm',
     parser.add_argument('rest', nargs=argparse.REMAINDER)
 
     args = parser.parse_args(args_list)
-    print(args)
-    if args.op == 'configure':
-        configure_shell(args.rest)
-    if args.op == 'cp':
-        copy_shell(args.rest)
+    handlers = (
+        ('configure', configure_shell),
+        ('cp', copy_shell),
+        ('ls', ls_shell),
+    )
+    for operation, handler in handlers:
+        if args.op == operation:
+            handler(args.rest)
+            break
 
 
-def configure_shell(args=None):
+def configure_shell(args_list=None):
     '''
     >>> configure_shell([])
 
     '''
     parser = argparse.ArgumentParser(description='Configure cloud mail ru client.')
-    parser.parse_args(args)
+    parser.parse_args(args_list)
     section = 'Credentials'
     if not config.has_section(section):
         config.add_section(section)
@@ -414,15 +419,26 @@ def copy_shell(args_list=None):
     parser.add_argument('-r', '--recursive', action='store_true')
     args = parser.parse_args(args_list)
 
-    cloud_prefix = 'cmr:/'
-    if args.from_path.startswith(cloud_prefix):
-        from_path = args.from_path[len(cloud_prefix):]
+    if args.from_path.startswith(CLOUD_PREFIX):
+        from_path = args.from_path[len(CLOUD_PREFIX):]
         download(from_path, args.to_path, args.recursive)
-    elif args.to_path.startswith(cloud_prefix):
-        to_path = args.to_path[len(cloud_prefix):]
+    elif args.to_path.startswith(CLOUD_PREFIX):
+        to_path = args.to_path[len(CLOUD_PREFIX):]
         upload(args.from_path, to_path, args.recursive)
     else:
         print("Can't copy local files")
+
+
+def ls_shell(args_list=None):
+    parser = argparse.ArgumentParser(description='List object in cloud.',
+                                     usage='%(prog)s ls [-h] [cloud_path]')
+    parser.add_argument('cloud_path', nargs='?', default='/')
+    args = parser.parse_args(args_list)
+
+    cloud_path = args.cloud_path.replace(CLOUD_PREFIX, '', 1)
+    cloud_path = cloud_path.replace('\\', '/')
+    ls = get_list(cloud_path)
+    print_list(ls)
 
 
 def get_value(current_value, config_name, prompt_text=''):
@@ -552,6 +568,11 @@ def get_list(cloud_path):
     cert_stuff()
     with CloudMailRu() as api:
         return api.list_files(cloud_path)
+
+
+def print_list(ls):
+    for item in ls:
+        print('\t'.join([str(item['size']), item['name'] + ('/' if item['type'] == 'folder' else '')]))
 
 
 def cert_stuff():
