@@ -215,20 +215,6 @@ def get_yes_no(value):
     return 'yes' if value else 'no'
 
 
-def create_cloud_path(path, cloud_base, local_base):
-    """ converts os path to the format acceptable by the cloud
-    example:
-    >>> cloud_base='/backups'
-    >>> local_base='./upload'
-    >>> path='./upload\\level1_1'
-    >>> create_cloud_path(path, cloud_base, local_base)
-    '/backups/level1_1'
-    """
-    normalized_path = path.replace('\\', '/')
-    clean_path = normalized_path.replace(local_base, '', 1)
-    return cloud_base + clean_path
-
-
 def resource_path(relative_path):
     """ Get absolute path to resource (source or frozen) """
     if hasattr(sys, '_MEIPASS'):
@@ -383,12 +369,12 @@ class CloudMailRu(requests.Session):
         return 0
 
 
-def shell():
+def shell(args_list=None):
     parser = argparse.ArgumentParser(description='File operations with mail ru cloud.')
     parser.add_argument('op', choices=['cp', 'configure'], help='operation')  # 'mv', 'rm',
     parser.add_argument('rest', nargs=argparse.REMAINDER)
 
-    args = parser.parse_args()
+    args = parser.parse_args(args_list)
     print(args)
     if args.op == 'configure':
         configure_shell(args.rest)
@@ -464,14 +450,28 @@ def get_input(prompt):
 def upload(from_path, to_path, recursive=False):
     cert_stuff()
     uploaded_files = set()
+    if not os.path.exists(from_path):
+        print('%s not exists' % from_path)
+        return
+    single_file = os.path.isfile(from_path)
+    if single_file:
+        to_load = [(os.path.normpath(os.path.dirname(from_path)), '', (os.path.basename(from_path),))]
+        cloud_base_dir = os.path.dirname(to_path)
+        local_base_dir = os.path.dirname(from_path)
+    else:
+        to_load = os.walk(from_path)
+        cloud_base_dir = to_path
+        local_base_dir = from_path
     with CloudMailRu() as api:
-        for folder, __, file_names in list(os.walk(from_path)):
+        for folder, __, file_names in to_load:
             # cloud dir should exist before uploading
-            cloud_path = create_cloud_path(folder, cloud_base=to_path, local_base=from_path)
-            api.create_folder(folder=cloud_path)
+            cloud_dir = create_cloud_path(folder, cloud_base=cloud_base_dir, local_base=local_base_dir)
+            api.create_folder(folder=cloud_dir)
             for local_file in file_names:
                 local_path = os.path.join(folder, local_file)
-                cloud_file = cloud_path + '/' + os.path.basename(local_file)
+                cloud_file = cloud_dir + '/' + local_file
+                if single_file and not to_path.endswith('/'):
+                    cloud_file = to_path
                 try:
                     api.upload_file(local_path, cloud_file)
                 except:
@@ -480,7 +480,38 @@ def upload(from_path, to_path, recursive=False):
                 uploaded_files.add(local_path)
             if not recursive:
                 break
-    print('Uploaded %s files', len(uploaded_files))
+    print('Uploaded %s files' % len(uploaded_files))
+
+
+def make_cloud_path(*dirs, cloud_base, local_base):
+    '''
+    join dirs, normalize and return absolute path to cloud
+    >>> make_cloud_path('/', '.\\.git', )
+    '/.git'
+    >>> make_cloud_path('/base', '.\\.git\\info', 'exclude')
+    '/base/.git/info/exclude'
+    >>> make_cloud_path('/base', '.\\.git\\info\')
+    '/base/.git/info'
+
+    '''
+    path = os.path.join(*dirs)
+    return os.path.normpath(path).replace('\\', '/')
+
+
+def create_cloud_path(path, cloud_base, local_base):
+    """ converts os path to the format acceptable by the cloud
+    example:
+    >>> cloud_base='/backups'
+    >>> local_base='./upload'
+    >>> path='./upload\\level1_1'
+    >>> create_cloud_path(path, cloud_base, local_base)
+    '/backups/level1_1'
+    >>> create_cloud_path('/file1', '')
+    """
+    normalized_path = path.replace('\\', '/')
+    clean_path = normalized_path.replace(local_base, '', 1)
+    result = cloud_base + clean_path
+    return os.path.normpath(result).replace('\\', '/')
 
 
 def download(from_path, to_path, recursive=False):
