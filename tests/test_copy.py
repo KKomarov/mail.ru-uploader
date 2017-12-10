@@ -22,6 +22,18 @@ class TestCopy(unittest.TestCase):
     def test_ls(self):
         shell(['ls'])
 
+    def test_download_dir2dir(self):
+        shell(['cp', 'cmr://RELEASE/jenkins/plugins', 'plugins'])
+
+    def test_download_file2dir(self):
+        shell(['cp', 'cmr://RELEASE/jenkins/plugins/ant.jpi', 'plugins'])
+
+    def test_download_file2dir2(self):
+        shell(['cp', 'cmr://RELEASE/jenkins/plugins/ant.jpi', 'plugins1/'])
+
+    def test_download_file2file(self):
+        shell(['cp', 'cmr://RELEASE/jenkins/plugins/ant.jpi', 'plugins/ant.jpi'])
+
     @patch('cmr.CloudMailRu')
     def test_shell_cp1(self, api_mock):
         shell(['cp', 'upload.log', 'cmr://.gitignore'])

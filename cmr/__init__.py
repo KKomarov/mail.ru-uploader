@@ -515,28 +515,49 @@ def download(from_path, to_path, recursive=False):
     downloaded = set()
     with CloudMailRu() as api:
         list_of_objects = api.list_files(from_path)
-        cloud_is_dir = any(o['type'] == 'folder' and o['home'] == from_path for o in list_of_objects)
-        is_dir = os.path.isdir(to_path)
+        if not list_of_objects:
+            print('Empty path: %s', from_path)
+            return
+
+        cloud_obj = next((o for o in list_of_objects if o['home'] == from_path), None)
+        if cloud_obj is None:
+            cloud_is_dir = True
+        else:
+            cloud_is_dir = cloud_obj['type'] == 'folder'
+
+        if cloud_is_dir:
+            os.makedirs(to_path, exist_ok=True)
+        else:
+            dirs = os.path.dirname(to_path)
+            if dirs:
+                os.makedirs(dirs, exist_ok=True)
+        local_is_dir = os.path.isdir(to_path)
+
+        # file -> dir/file
         if not cloud_is_dir:
-            if is_dir:
+            if local_is_dir:
                 to_path = os.path.join(to_path, os.path.basename(from_path))
+                to_path = os.path.normpath(to_path)
             api.get_file(from_path, to_path)
             downloaded.add(from_path)
             print('Downloaded: %s' % len(downloaded))
             return
 
-        if not is_dir:
-            print("Can't dir to file")
+        # dir -> file
+        if not local_is_dir:
+            print("Can't copy directory to file.")
             return
 
+        # dir -> dir
         for o in list_of_objects:
             obj_type, obj_home = o['type'], o['home']
             if obj_type != 'file':
                 continue
             cloud_name = os.path.basename(obj_home)
             local_file = to_path
-            if is_dir:
+            if local_is_dir:
                 local_file = os.path.join(to_path, cloud_name)
+                local_file = os.path.normpath(local_file)
 
             api.get_file(obj_home, local_file)
             downloaded.add(obj_home)
